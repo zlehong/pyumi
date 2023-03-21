@@ -1,6 +1,7 @@
 """Shoebox class."""
 import logging
 from typing import Optional
+import numpy as np
 
 from archetypal import IDF
 from archetypal.template.zone_construction_set import ZoneConstructionSet
@@ -15,6 +16,8 @@ from geomeppy.recipes import (
     _has_correct_orientation,
     _is_window,
     window_vertices_given_wall,
+    scale_coords,
+    translate_coords,
 )
 from validator_collection import checkers, validators
 
@@ -349,6 +352,7 @@ class ShoeBox(IDF):
                     internal_mass.to_epbunch(idf, zone.Name)
 
                 # add dhw gains
+                print("hello!")
                 building_template.Core.DomesticHotWater.to_epbunch(
                     idf, zone.Name, floor_area
                 )
@@ -464,6 +468,44 @@ class ShoeBox(IDF):
                 ).Name
                 if zone_construction_set.IsSlabAdiabatic:
                     surface.Outside_Boundary_Condition = "Adiabatic"
+
+    def add_adiabatic_to_surface(
+        self, surface, name, adiab_2_area, construction_string=None, axes="x"
+    ):
+        original_coords = surface.coords.copy()
+        if surface.Surface_Type.upper() == "ROOF":
+            type = "Ceiling"
+        else:
+            type = surface.Surface_Type
+
+        if construction_string is None:
+            construction_string = surface.Construction_Name
+
+        width = surface_width(surface)
+        scaled_coords = scale_coords(surface.coords, 1 - adiab_2_area, axes=axes)
+        surface.setcoords(scaled_coords)
+        adiab_coords = scale_coords(original_coords, adiab_2_area, axes=axes)
+        x_trans = (1 - adiab_2_area) * width
+        adiab_coords = translate_coords(
+            adiab_coords.vertices_list.copy(), (x_trans, 0, 0)
+        )
+        # # TODO: check if there are any other elements with the same name
+        ceiling = self.newidfobject(
+            "BUILDINGSURFACE:DETAILED",
+            Name=name,
+            Surface_Type=type,
+            Construction_Name=construction_string,
+            Zone_Name=surface.Zone_Name,
+            Outside_Boundary_Condition="Adiabatic",
+            Sun_Exposure="NoSun",
+            Wind_Exposure="NoWind",
+        )
+        ceiling.setcoords(adiab_coords)
+
+
+def surface_width(surface):
+    xs = np.array(surface.coords)[:, 0]
+    return xs.max() - xs.min()
 
 
 def set_wwr(
